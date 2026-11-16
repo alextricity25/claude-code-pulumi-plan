@@ -43,7 +43,20 @@ Registered runs live in session state and do not survive a session restart; regi
 | `mcp__pulumi-plan__show` | `previewJson`: absolute path of a file holding one preview's `--json` stdout. `worktree`: absolute path of the git checkout the preview ran from. `role`: `baseline` \| `branch` \| `apply`. Optional `label` (required for `branch`). `stack` and `project`: only used when the preview has no steps to derive them from. `projectDir`: role `apply`, required, the directory holding `Pulumi.yaml`. `targets`: role `apply`, the exact `--target` URNs the preview used. Git info (HEAD, branch, merge parents, dirty file count) is read from `worktree` at call time, so register before removing a scratch worktree. |
 | `mcp__pulumi-plan__apply` | `project`, `stack`. Works only after the Approve press. |
 | `mcp__pulumi-plan__apply_status` | `project`, `stack`. Reports running/finished, exit code and log tail; waits up to about 9 minutes for a running job. |
-| `/pulumi-plan` | Opens the pane. `/pulumi-plan clear` empties it. |
+| `/pulumi-plan` | Opens the pane. `/pulumi-plan clear` empties it. `/pulumi-plan theme` rereads the theme file and lists any problems in it. |
+
+## Look and feel
+
+The pane's colours and chip font come from an optional `~/.claude/pulumi-plan/theme.json`. Each `colors` entry overrides one palette key (`#rrggbb` only); every key left out keeps its default. `font` is a CSS font-family for the chips and banner the desktop app draws as images.
+
+```json
+{
+  "colors": { "paper": "#0d1117", "card": "#161b22", "ink": "#e6edf3" },
+  "font": "JetBrains Mono, monospace"
+}
+```
+
+The file is read at session start; `/pulumi-plan theme` rereads it, redraws the pane and lists anything it ignored. Ask Claude to restyle the pane and the bundled `/pulumi-plan:theme` skill writes the file (it lists every palette key, what it paints, and a full dark theme). To reset, delete the file or write `{}`.
 
 ## Workflows
 
