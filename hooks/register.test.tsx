@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 
 import { launchArgv, previewArgv } from './apply'
 import { URNS, applyPreview, baselinePreview, branchPreview, preMergePreview, urn } from './fixtures'
-import { PALETTE, PILL_FILLS, chipSvg, pillHoverFill } from './style'
+import { DEFAULT_PALETTE as PALETTE, PILL_KEYS, chipSvg, pillHoverFill } from './style'
 
 const TOOL = 'mcp__pulumi-plan__show'
 const HEAD = 'c0ffee0000000000000000000000000000000001'
@@ -120,7 +120,7 @@ async function findChip(ui: AnyPane, pattern: string | RegExp): Promise<string |
   return labels.find(label => (typeof pattern === 'string' ? label.includes(pattern) : pattern.test(label)))
 }
 
-const PILLS = new Set<string>(PILL_FILLS)
+const PILLS = new Set<string>(PILL_KEYS.map(key => PALETTE[key]))
 
 type Node = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
 
@@ -1067,7 +1067,7 @@ test('the pending drift section counts drift steps only, like the header chip, w
 })
 
 test('a pill darkens 20% toward ink on hover', async () => {
-  expect(PILL_FILLS.map(pillHoverFill)).toEqual([
+  expect(PILL_KEYS.map(key => pillHoverFill(PALETTE[key]))).toEqual([
     '#0061bd',
     '#484fcd',
     '#536372',
@@ -1363,4 +1363,164 @@ test('Approve all on a two-button card re-previews and applies every step withou
   const script = Object.entries(rec.writes).find(([path]) => path.endsWith('/run.sh'))?.[1] ?? ''
   expect(script).toContain(`'--suppress-outputs' > `)
   expect(script).not.toContain('--target')
+})
+
+const THEME_PATH = `${HOME_DIR}/.claude/pulumi-plan/theme.json`
+
+type Command = { command: { run: (input: { command: string; args?: string }) => Promise<Answer> } }
+
+const runCommand = ($: unknown, args: string) => ($ as Command).command.run({ command: 'pulumi-plan', args })
+
+function recordUi(on: On, { isPaneOpen = false } = {}) {
+  const opened: string[] = []
+  const toasts: string[] = []
+  on('ui.open', { id: 'pulumi-plan' }, (_, e, next) => {
+    opened.push(String(e.backgroundColor))
+
+    return next(e)
+  })
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({
+    value: isPaneOpen ? [{ id: 'pulumi-plan', title: 'Pulumi plan', isShown: true, isFocused: false, isPlaced: true }] : [],
+  }))
+
+  return { opened, toasts }
+}
+
+async function drawnColors(ui: AnyPane): Promise<Set<string>> {
+  const colors = new Set<string>()
+  for (const { node } of paneElements(await ui.drawn())) {
+    for (const prop of ['color', 'backgroundColor'] as const) {
+      if (node.props?.[prop] !== undefined) colors.add(String(node.props[prop]))
+    }
+    const hover = (node as { hover?: { backgroundColor?: unknown } }).hover
+    if (hover?.backgroundColor !== undefined) colors.add(String(hover.backgroundColor))
+    if (node.type === 'Svg') {
+      for (const hex of String(node.props?.source).match(/#[0-9a-fA-F]{6}\b/g) ?? []) colors.add(hex)
+    }
+  }
+
+  return colors
+}
+
+async function expectThemeColors(ui: AnyPane, colors: Record<string, string>) {
+  const palette: Record<string, string> = { ...PALETTE, ...colors }
+  const allowed = new Set([...Object.values(palette), ...PILL_KEYS.map(key => pillHoverFill(palette[key] ?? '', palette.ink))])
+  const drawn = await drawnColors(ui)
+  expect([...drawn].filter(color => !allowed.has(color))).toEqual([])
+  for (const [key, color] of Object.entries(colors)) {
+    expect(`${key} ${color}: ${drawn.has(color)}`).toBe(`${key} ${color}: true`)
+    const fallback = PALETTE[key as keyof typeof PALETTE]
+    expect(`${key} default ${fallback}: ${drawn.has(fallback)}`).toBe(`${key} default ${fallback}: false`)
+  }
+}
+
+const DARK = { paper: '#0d1117', ink: '#e6edf3', accent: '#8957e5', pillCard: '#1f6feb' }
+
+test('a theme file present at session start colours the pane, its pills, chips, banner and background', async ($, on) => {
+  const { opened, toasts } = recordUi(on)
+  const { rec } = applyEngine(on)
+  rec.files[THEME_PATH] = JSON.stringify({ colors: DARK, font: 'Iosevka Term, monospace' })
+  await start($)
+  await registerBaseline($, 'staging', rec.files)
+  await registerApply($, 'staging', {}, rec.files)
+
+  expect(toasts).toEqual([])
+  expect(opened.at(-1)).toBe(DARK.paper)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await expectThemeColors(ui, DARK)
+    type Hovered = Node & { hover?: unknown }
+    const byKey = async (key: string) => paneElements(await ui.drawn()).find(({ node }) => node.props?.key === key)?.node as Hovered | undefined
+    const bar = await byKey(`${cardId('staging')}|bar`)
+    const approve = await byKey(`${cardId('staging')}|approve|pill`)
+    expect(bar?.props?.backgroundColor).toBe(DARK.pillCard)
+    expect(bar?.hover).toEqual({ backgroundColor: pillHoverFill(DARK.pillCard, DARK.ink) })
+    expect(approve?.props?.backgroundColor).toBe(DARK.accent)
+    expect(approve?.hover).toEqual({ backgroundColor: pillHoverFill(DARK.accent, DARK.ink) })
+    if (surface === 'desktop') {
+      const banner = (await ui.findAll({ type: 'Svg' })).find(svg => String(svg.props.alt).startsWith('PULUMI PLAN'))
+      expect(String(banner?.props.source)).toContain('font-family="Iosevka Term, monospace"')
+      expectWellFormed(String(banner?.props.source))
+    }
+    await ui.unmount()
+  }
+})
+
+test('/pulumi-plan theme rereads the file, reports it, and the open pane redraws with the new colours', async ($, on) => {
+  const { opened } = recordUi(on, { isPaneOpen: true })
+  const { rec } = applyEngine(on)
+  rec.files[THEME_PATH] = JSON.stringify({ colors: { pillCard: '#1f6feb' } })
+  await start($)
+  await registerApply($, 'staging', {}, rec.files)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' as (typeof SURFACES)[number] })
+  await expectThemeColors(ui, { pillCard: '#1f6feb' })
+
+  rec.files[THEME_PATH] = JSON.stringify({ colors: { pillCard: '#8250df', paper: '#fdf6e3', ink: 'navy' }, font: 'Fira Code' })
+  const answer = await runCommand($, 'theme')
+
+  expect(answer.text).toBe(
+    [
+      `Theme file ${THEME_PATH}: 2 colour overrides and the font "Fira Code" in effect.`,
+      '1 problem, each ignored (what it names keeps its default):',
+      '- "ink" in "colors" is "navy", not a "#rrggbb" colour',
+    ].join('\n'),
+  )
+  await expectThemeColors(ui, { pillCard: '#8250df', paper: '#fdf6e3' })
+  expect(opened.at(-1)).toBe('#fdf6e3')
+
+  delete rec.files[THEME_PATH]
+  expect((await runCommand($, 'theme')).text).toBe(`No theme file at ${THEME_PATH}: the Pulumi plan pane uses its default look.`)
+  await expectPaletteOnly(ui)
+  expect(opened.at(-1)).toBe(PALETTE.paper)
+  await ui.unmount()
+})
+
+test('/pulumi-plan theme leaves a closed pane closed', async ($, on) => {
+  const { opened } = recordUi(on)
+  const { rec } = applyEngine(on)
+  await start($)
+  rec.files[THEME_PATH] = '{}'
+
+  expect((await runCommand($, 'theme')).text).toBe(`Theme file ${THEME_PATH}: 0 colour overrides and no font override in effect.`)
+  expect(opened).toEqual([])
+})
+
+for (const [kind, broken] of [
+  ['invalid JSON', '{ "colors": { "paper": '],
+  ['a bad colour', '{ "colors": { "paper": "dark" } }'],
+  ['a root that is not an object', '[]'],
+] as const) {
+  test(`a theme file with ${kind} leaves the default look, still draws the pane, and toasts once at session start`, async ($, on) => {
+    const { opened, toasts } = recordUi(on)
+    const { rec } = applyEngine(on)
+    rec.files[THEME_PATH] = broken
+    await start($)
+    await registerBaseline($, 'staging', rec.files)
+    await registerApply($, 'staging', {}, rec.files)
+
+    expect(toasts).toEqual([`The theme file ${THEME_PATH} has 1 problem; /pulumi-plan theme lists them.`])
+    expect(opened.at(-1)).toBe(PALETTE.paper)
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount({ ...PANE, surface })
+      expect(await findChip(ui, 'APPROVE ALL · 2 STEPS (1 CHANGE + 1 DRIFT) → demo/staging')).toBeDefined()
+      await expectPaletteOnly(ui)
+      await expectPillsOnly(ui)
+      await ui.unmount()
+    }
+  })
+}
+
+test('with HOME unset the theme is the default and /pulumi-plan theme says why', async ($, on) => {
+  engine(on)
+  mock.env(on, {})
+  const { toasts } = recordUi(on)
+  await start($)
+
+  expect(toasts).toEqual([])
+  expect((await runCommand($, 'theme')).text).toMatch(/^HOME is not set/)
 })

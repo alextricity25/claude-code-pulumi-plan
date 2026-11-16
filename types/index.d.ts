@@ -110,6 +110,11 @@ export type PlanJob = {
   targets?: string[]
 }
 
+export type PlanTheme = {
+  colors: Record<string, string>
+  font?: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'pulumi-plan': {
@@ -117,6 +122,7 @@ declare module 'claude-code' {
       open: StateFamily<boolean>
       approvals: Shaped<Record<string, PlanApproval>>
       jobs: Shaped<Record<string, PlanJob>>
+      theme: Shaped<PlanTheme>
     }
   }
 }

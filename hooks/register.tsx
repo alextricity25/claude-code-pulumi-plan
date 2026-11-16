@@ -58,7 +58,8 @@ import {
   upsertRun,
 } from './plan'
 import type { Card, Entry, Preview } from './plan'
-import { PALETTE, PILL_FILLS, bannerSvg, chipSvg, metaLabel, pillHoverFill, plural } from './style'
+import { bannerSvg, chipSvg, describeTheme, metaLabel, parseTheme, pillHoverFill, plural, resolveTheme } from './style'
+import type { PaletteKey, PillKey, ThemeLoad } from './style'
 
 const PANE = 'pulumi-plan'
 const TOOL = 'mcp__pulumi-plan__show'
@@ -69,10 +70,12 @@ const ROW_LIMIT = 50
 const POLL_MS = 3000
 const SINCE_LIMIT = 50
 const PANE_TAIL_LINES = 15
+const THEME_FILE = '.claude/pulumi-plan/theme.json'
 
 const runs = atom({ plugin: 'pulumi-plan', key: 'runs' } as const, [], { shape: 'runs-1' })
 const approvals = atom({ plugin: 'pulumi-plan', key: 'approvals' } as const, {}, { shape: 'approvals-1' })
 const jobs = atom({ plugin: 'pulumi-plan', key: 'jobs' } as const, {}, { shape: 'jobs-1' })
+const overrides = atom({ plugin: 'pulumi-plan', key: 'theme' } as const, { colors: {} }, { shape: 'theme-1' })
 const OPEN = { plugin: 'pulumi-plan', key: 'open' } as const
 
 const TITLES: Record<PlanChangeCategory, string> = {
@@ -82,20 +85,18 @@ const TITLES: Record<PlanChangeCategory, string> = {
   delete: 'Delete',
 }
 
-type PillFill = (typeof PILL_FILLS)[number]
-
-const CATEGORY_PILLS: Record<PlanChangeCategory, PillFill> = {
-  create: PALETTE.pillCreate,
-  update: PALETTE.pillUpdate,
-  replace: PALETTE.pillDanger,
-  delete: PALETTE.pillDanger,
+const CATEGORY_PILLS: Record<PlanChangeCategory, PillKey> = {
+  create: 'pillCreate',
+  update: 'pillUpdate',
+  replace: 'pillDanger',
+  delete: 'pillDanger',
 }
 
-const CATEGORY_FILLS: Record<PlanChangeCategory, string> = {
-  create: PALETTE.create,
-  update: PALETTE.update,
-  replace: PALETTE.replace,
-  delete: PALETTE.delete,
+const CATEGORY_FILLS: Record<PlanChangeCategory, PaletteKey> = {
+  create: 'create',
+  update: 'update',
+  replace: 'replace',
+  delete: 'delete',
 }
 
 const DESCRIPTION = [
@@ -872,6 +873,41 @@ async function applyStatus($: Dollar, input: Record<string, unknown>): Promise<T
   return { result: describeJob(key, job, await $.clock.now()) }
 }
 
+async function loadTheme($: Dollar): Promise<ThemeLoad> {
+  let home: string | undefined
+  try {
+    home = await $.env.get('HOME')
+  } catch {
+    home = undefined
+  }
+  if (!home) {
+    return { theme: { colors: {} }, problems: [], path: null, isFound: false }
+  }
+  const path = `${home}/${THEME_FILE}`
+  try {
+    if (!(await $.fs.exists(path))) {
+      return { theme: { colors: {} }, problems: [], path, isFound: false }
+    }
+    const raw = await $.fs.read(path)
+
+    return { ...parseTheme(typeof raw === 'string' ? raw : ''), path, isFound: true }
+  } catch (error) {
+    return { theme: { colors: {} }, problems: [`cannot read ${path}: ${message(error)}`], path, isFound: true }
+  }
+}
+
+async function refreshTheme($: Dollar): Promise<ThemeLoad> {
+  const load = await loadTheme($)
+  await update($, overrides, () => load.theme)
+
+  return load
+}
+
+async function openPane($: Dollar): Promise<void> {
+  const { palette } = resolveTheme(await read($, overrides))
+  await $.ui.open({ id: PANE, title: 'Pulumi plan', backgroundColor: palette.paper })
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.tool.register({
@@ -894,9 +930,17 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'pulumi-plan',
-      description: 'Open the Pulumi plan pane; `/pulumi-plan clear` empties it',
-      argumentHint: '[clear]',
+      description: 'Open the Pulumi plan pane; `/pulumi-plan clear` empties it, `/pulumi-plan theme` reloads its theme file',
+      argumentHint: '[clear|theme]',
     })
+    try {
+      const load = await refreshTheme($)
+      if (load.path !== null && load.problems.length > 0) {
+        $.ui.toast(`The theme file ${load.path} has ${plural(load.problems.length, 'problem')}; /pulumi-plan theme lists them.`)
+      }
+    } catch {
+      // The pane keeps the default look.
+    }
     const now = await $.clock.now()
     const stored = await update($, jobs, record =>
       Object.fromEntries(
@@ -916,7 +960,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'pulumi-plan' }, async ($, e) => {
-    if (e.args.trim() === 'clear') {
+    const args = e.args.trim()
+    if (args === 'clear') {
       const kept = await clearAll($)
 
       return {
@@ -926,7 +971,15 @@ export const register: Register = on => {
             : 'Pulumi plan pane cleared.',
       }
     }
-    await $.ui.open({ id: PANE, title: 'Pulumi plan', backgroundColor: PALETTE.paper })
+    if (args === 'theme') {
+      const load = await refreshTheme($)
+      if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
+        await openPane($)
+      }
+
+      return { text: describeTheme(load) }
+    }
+    await openPane($)
 
     return { text: 'Pulumi plan pane opened.' }
   })
@@ -1013,7 +1066,7 @@ export const register: Register = on => {
     if (role === 'apply' || role === 'baseline') {
       stored = await linkSince($, project, stack)
     }
-    await $.ui.open({ id: PANE, title: 'Pulumi plan', backgroundColor: PALETTE.paper })
+    await openPane($)
     const sameStack = (r: PlanRun) => r.project === project && r.stack === stack
     const baseline = stored.find(r => r.role === 'baseline' && sameStack(r))
     const apply = stored.find(r => r.role === 'apply' && sameStack(r))
@@ -1040,7 +1093,8 @@ export const register: Register = on => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button } = table
     const isTerminal = e.surface === 'terminal'
-    const P = PALETTE
+    const theme = resolveTheme(await read($, overrides))
+    const P = theme.palette
     const all = await read($, runs)
     const approvalsNow = await read($, approvals)
     const jobsNow = await read($, jobs)
@@ -1053,7 +1107,7 @@ export const register: Register = on => {
     const chip = (text: string, fill: string, ink: string = P.ink) => {
       if (!isTerminal && 'Svg' in table) {
         const Svg = table.Svg
-        const svg = chipSvg(text, fill, ink)
+        const svg = chipSvg(text, fill, ink, theme)
 
         return <Svg source={svg.source} alt={svg.alt} width={svg.width} height={svg.height} />
       }
@@ -1067,7 +1121,7 @@ export const register: Register = on => {
 
     const titleBar = (content: RenderChildren, hoverKey?: string) => (
       <Box
-        {...(hoverKey === undefined ? {} : { key: `${hoverKey}|bar`, hover: { backgroundColor: pillHoverFill(P.pillCard) } })}
+        {...(hoverKey === undefined ? {} : { key: `${hoverKey}|bar`, hover: { backgroundColor: pillHoverFill(P.pillCard, P.ink) } })}
         flexDirection="row"
         backgroundColor={P.pillCard}
         paddingX={1}
@@ -1102,11 +1156,11 @@ export const register: Register = on => {
       </Box>
     )
 
-    const pill = (key: string, caption: string, onPress: () => unknown, fill: PillFill, size: Size = 'caption') => (
+    const pill = (key: string, caption: string, onPress: () => unknown, fill: PillKey, size: Size = 'caption') => (
       <Box
         key={`${key}|pill`}
-        backgroundColor={fill}
-        hover={{ backgroundColor: pillHoverFill(fill) }}
+        backgroundColor={P[fill]}
+        hover={{ backgroundColor: pillHoverFill(P[fill], P.ink) }}
         paddingX={1}
         flexShrink={0}
         alignSelf="flex-start"
@@ -1119,7 +1173,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    const toggleRow = (key: string, caption: string, initial: boolean, fill: PillFill, beside: RenderChildren, size: Size = 'caption') => (
+    const toggleRow = (key: string, caption: string, initial: boolean, fill: PillKey, beside: RenderChildren, size: Size = 'caption') => (
       <Box flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
         {pill(key, caption, toggle(key, initial), fill, size)}
         {beside}
@@ -1209,7 +1263,7 @@ export const register: Register = on => {
       const id = `${groupId}|${step.urn}`
       const open = await isOpen(id, false)
       const preview = rowPreview(step)
-      const header = toggleRow(id, `${glyph(open)} ${cleanText(step.name)}`, false, P.pillNeutral, [
+      const header = toggleRow(id, `${glyph(open)} ${cleanText(step.name)}`, false, 'pillNeutral', [
         <Text color={isMuted ? P.faint : P.muted} mono size="caption">
           {step.type}
         </Text>,
@@ -1257,7 +1311,7 @@ export const register: Register = on => {
         <Box flexDirection="column" rowGap="xs">
           {rows}
           {!showAll && entries.length > ROW_LIMIT && (
-            pill(moreId, `SHOW ${entries.length - ROW_LIMIT} MORE`, toggle(moreId, false), P.pillNeutral)
+            pill(moreId, `SHOW ${entries.length - ROW_LIMIT} MORE`, toggle(moreId, false), 'pillNeutral')
           )}
         </Box>
       )
@@ -1302,7 +1356,7 @@ export const register: Register = on => {
       title: string,
       count: number,
       fill: string,
-      pillFill: PillFill,
+      pillFill: PillKey,
       body: () => Promise<RenderChildren>,
       shownCount: number = count,
     ) => {
@@ -1412,7 +1466,7 @@ export const register: Register = on => {
           {job.status === 'running' && tail !== '' && logBlock(tail.split('\n').slice(-PANE_TAIL_LINES).join('\n'))}
           {job.jobDir !== undefined && metaRow('job folder', value(job.jobDir, P.muted, 'caption'))}
           {isFinished && tail !== '' && (
-            pill(logId, `${glyph(isLogOpen)} LOG`, toggle(logId, false), P.pillNeutral)
+            pill(logId, `${glyph(isLogOpen)} LOG`, toggle(logId, false), 'pillNeutral')
           )}
           {isFinished && tail !== '' && isLogOpen && logBlock(tail)}
         </Box>
@@ -1461,7 +1515,7 @@ export const register: Register = on => {
             P.ok,
             P.onAccent,
           ),
-          pill(`${card.id}|revoke`, 'REVOKE', withdraw(run), P.pillNeutral),
+          pill(`${card.id}|revoke`, 'REVOKE', withdraw(run), 'pillNeutral'),
         ])
       }
       if (isBound && approval.status === 'armed') {
@@ -1474,8 +1528,8 @@ export const register: Register = on => {
               P.dangerInk,
             ),
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {pill(`${card.id}|confirm`, 'YES, APPLY TO PRODUCTION', confirm(run), P.pillDanger)}
-              {pill(`${card.id}|cancel`, 'CANCEL', withdraw(run), P.pillNeutral)}
+              {pill(`${card.id}|confirm`, 'YES, APPLY TO PRODUCTION', confirm(run), 'pillDanger')}
+              {pill(`${card.id}|cancel`, 'CANCEL', withdraw(run), 'pillNeutral')}
             </Box>,
           ])
         )
@@ -1485,11 +1539,11 @@ export const register: Register = on => {
         <Box flexDirection="column" gap={1}>
           {isBound && approval.status === 'approved' && value(`The approval from ${hhmm(approval.at)} expired.`, P.faint, 'caption')}
           {offered === null ? (
-            pill(`${card.id}|approve`, approveCaption(card), approve(run), P.accent)
+            pill(`${card.id}|approve`, approveCaption(card), approve(run), 'accent')
           ) : (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {pill(`${card.id}|approve`, approveCaption(card, 'APPROVE ALL'), approve(run), P.accent)}
-              {pill(`${card.id}|approve-change`, changeCaption(card, offered), approve(run, 'change'), P.accent)}
+              {pill(`${card.id}|approve`, approveCaption(card, 'APPROVE ALL'), approve(run), 'accent')}
+              {pill(`${card.id}|approve-change`, changeCaption(card, offered), approve(run, 'change'), 'accent')}
             </Box>
           )}
         </Box>
@@ -1581,7 +1635,7 @@ export const register: Register = on => {
             subGroup(
               TITLES[category],
               comparison.drift[category].length,
-              CATEGORY_FILLS[category],
+              P[CATEGORY_FILLS[category]],
               await drawEntries(`${id}|drift|${category}`, comparison.drift[category], !isPending),
             ),
           ),
@@ -1612,12 +1666,12 @@ export const register: Register = on => {
       const sections = [
         ...(await Promise.all(
           CHANGE_CATEGORIES.map(category =>
-            drawSection(`${id}|${category}`, TITLES[category], comparison.change[category].length, CATEGORY_FILLS[category], CATEGORY_PILLS[category], () =>
+            drawSection(`${id}|${category}`, TITLES[category], comparison.change[category].length, P[CATEGORY_FILLS[category]], CATEGORY_PILLS[category], () =>
               drawEntries(`${id}|${category}`, comparison.change[category], false),
             ),
           ),
         )),
-        await drawSection(`${id}|diagnostics`, 'Diagnostics', comparison.newDiagnostics.length, P.info, P.pillInfo, async () =>
+        await drawSection(`${id}|diagnostics`, 'Diagnostics', comparison.newDiagnostics.length, P.info, 'pillInfo', async () =>
           drawDiagnostics(comparison.newDiagnostics),
         ),
         isPending
@@ -1626,7 +1680,7 @@ export const register: Register = on => {
               'Also applied: drift already pending',
               drift + comparison.driftDiagnostics.length,
               P.pendingDrift,
-              P.pillPending,
+              'pillPending',
               driftSections,
               drift,
             )
@@ -1635,16 +1689,16 @@ export const register: Register = on => {
               'Drift already in the stack',
               drift + comparison.baselineOnly.length + comparison.driftDiagnostics.length,
               P.drift,
-              P.pillNeutral,
+              'pillNeutral',
               driftSections,
               drift,
             ),
         isPending
-          ? await drawSection(`${id}|no-longer-pending`, 'No longer pending', comparison.baselineOnly.length, P.drift, P.pillNeutral, () =>
+          ? await drawSection(`${id}|no-longer-pending`, 'No longer pending', comparison.baselineOnly.length, P.drift, 'pillNeutral', () =>
               drawEntries(`${id}|baseline-only`, comparison.baselineOnly, true),
             )
           : null,
-        await drawSection(`${id}|other`, 'Other', comparison.other.length, P.drift, P.pillNeutral, () =>
+        await drawSection(`${id}|other`, 'Other', comparison.other.length, P.drift, 'pillNeutral', () =>
           drawEntries(`${id}|other`, comparison.other, true),
         ),
       ]
@@ -1681,7 +1735,7 @@ export const register: Register = on => {
           {chipRow(notices)}
           {card.isApply && (await drawApply(card))}
           {sections}
-          {toggleRow(detailsId, `${glyph(isDetailsOpen)} DETAILS`, false, P.pillNeutral, null)}
+          {toggleRow(detailsId, `${glyph(isDetailsOpen)} DETAILS`, false, 'pillNeutral', null)}
           {isDetailsOpen && (
             <Box flexDirection="column" paddingLeft={2}>
               {run.git.isAvailable && metaRow('head', value(run.git.head, P.muted))}
@@ -1717,7 +1771,7 @@ export const register: Register = on => {
       if (!isTerminal && 'Svg' in table) {
         const Svg = table.Svg
 
-        return <Svg source={bannerSvg('PULUMI PLAN', subtitle)} alt={`PULUMI PLAN · ${subtitle}`} />
+        return <Svg source={bannerSvg('PULUMI PLAN', subtitle, theme)} alt={`PULUMI PLAN · ${subtitle}`} />
       }
 
       return (
@@ -1737,7 +1791,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" backgroundColor={P.paper} padding={1} gap={1}>
         {banner()}
-        {pill('clear', 'CLEAR', () => clearAll($), P.pillNeutral)}
+        {pill('clear', 'CLEAR', () => clearAll($), 'pillNeutral')}
         {all.length === 0 && (
           cardFrame(
             titleBar(
