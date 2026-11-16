@@ -1,0 +1,5 @@
+{
+  "name": "claude-code-pulumi-plan",
+  "owner": { "name": "Vic Agnew" },
+  "plugins": [{ "name": "pulumi-plan", "source": "./" }]
+}
