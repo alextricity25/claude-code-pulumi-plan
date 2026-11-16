@@ -4,6 +4,8 @@ A Claude Code mod that shows what `pulumi preview` would change, separates a bra
 
 Not affiliated with Pulumi or Anthropic.
 
+![The Pulumi plan pane: a branch review card for a staging stack and an apply card for a production stack, with dummy data](docs/screenshot.png)
+
 ## What it does
 
 - A pane ("Pulumi plan") with one card per project/stack, fed by `pulumi preview --json` output files that Claude registers.
