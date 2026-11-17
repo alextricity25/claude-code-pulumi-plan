@@ -60,17 +60,20 @@ The pane's look comes from one optional file: `$HOME/.claude/pulumi-plan/theme.j
 | `pillDanger` | `#eb3233` | Replace and Delete section pills; YES, APPLY TO PRODUCTION |
 | `pillPending` | `#ba4e11` | "Also applied: drift already pending" section pill |
 | `pillInfo` | `#0074f8` | Diagnostics section pill |
+| `riskLow` | `#abf6d3` | LOW RISK chip |
+| `riskMedium` | `#ffe48b` | MEDIUM RISK chip |
+| `riskHigh` | `#ad080a` | HIGH RISK chip (its text is `onAccent`) |
 
 ## Contrast
 
 Keep 4.5:1 or more for every pair below; the bold `onAccent` labels need at least 3:1, also against their hover fill (the fill moved 20% toward `ink`).
 
 - `ink`, `muted`, `faint` on `card`, `panel` and `accentPaper`
-- `ink` on `warning`, `create`, `update`, `replace`, `delete`, `drift`, `pendingDrift`, `info`, `accentSoft`
+- `ink` on `warning`, `create`, `update`, `replace`, `delete`, `drift`, `pendingDrift`, `info`, `accentSoft`, `riskLow`, `riskMedium`
 - `warnInk` on `warning` and on `card`
 - `dangerInk` on `accentPaper` and on `removedBg`
 - `removedInk` on `removedBg`, `addedInk` on `addedBg`, `logInk` on `logBg`
-- `onAccent` on `accent`, `ok`, `danger` and every `pill*` key
+- `onAccent` on `accent`, `ok`, `danger`, `riskHigh` and every `pill*` key
 - `ink` as a rim against `paper` and `card`: on a dark theme `ink` is light, so cards get a light rim
 
 ## Procedure
@@ -126,7 +129,10 @@ Every key a coherent dark look needs; `onAccent` keeps its default white and `ok
     "pillUpdate": "#7d6008",
     "pillDanger": "#b62324",
     "pillPending": "#9a4a07",
-    "pillInfo": "#1f5fbf"
+    "pillInfo": "#1f5fbf",
+    "riskLow": "#1b4332",
+    "riskMedium": "#5a4210",
+    "riskHigh": "#b62324"
   }
 }
 ```

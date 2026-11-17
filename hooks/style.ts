@@ -38,6 +38,9 @@ export const DEFAULT_PALETTE = {
   pillDanger: '#eb3233',
   pillPending: '#ba4e11',
   pillInfo: '#0074f8',
+  riskLow: '#abf6d3',
+  riskMedium: '#ffe48b',
+  riskHigh: '#ad080a',
 } as const
 
 export type PaletteKey = keyof typeof DEFAULT_PALETTE
