@@ -10,10 +10,11 @@ The pane's look comes from one optional file: `$HOME/.claude/pulumi-plan/theme.j
 ## Schema
 
 ```json
-{ "colors": { "<palette key>": "#rrggbb" }, "font": "<CSS font-family>" }
+{ "preset": "<bundled theme>", "colors": { "<palette key>": "#rrggbb" }, "font": "<CSS font-family>" }
 ```
 
-- Both keys are optional. No file, or `{}`, is the default look.
+- Every key is optional. No file, or `{}`, is the default look.
+- `preset` picks a bundled theme: `default`, `dark`, `solarized-dark` or `high-contrast`. `colors` then overrides single keys of that theme. `/pulumi-plan theme list` lists them.
 - Overlay: each `colors` entry replaces that one key; every key left out keeps its default.
 - Colours are `#rrggbb` only: no `#rgb`, no alpha, no names, no `rgb()`.
 - `font` is a CSS `font-family` string of 1 to 200 characters. It sets the font of the chips and the banner, which the desktop app draws as images. Text elsewhere, and everything in the terminal, uses the surface's own monospace font.
@@ -78,9 +79,9 @@ Keep 4.5:1 or more for every pair below; the bold `onAccent` labels need at leas
 
 ## Procedure
 
-1. Read `$HOME/.claude/pulumi-plan/theme.json` if it exists, and keep what it has unless the user asked to change it.
+1. Read `$HOME/.claude/pulumi-plan/theme.json` if it exists, and keep what it has unless the user asked to change it. When a bundled theme is close to what the user wants (dark, solarized, high contrast), set `preset` to it and add only the differences to `colors`.
 2. Work out the new values and merge them into its `colors` (and `font`).
-3. Drop every entry equal to its default in the table above (compare case-insensitively), and `font` when it is `ui-monospace, SFMono-Regular, Menlo, monospace`.
+3. Drop every entry equal to its value in the chosen `preset`, or with no preset its default in the table above (compare case-insensitively), and `font` when it is `ui-monospace, SFMono-Regular, Menlo, monospace`.
 4. Create `$HOME/.claude/pulumi-plan/` if it is missing and write the file as formatted JSON.
 5. Tell the user to run `/pulumi-plan theme` (or start a new session). It reports the file, how many colour overrides and whether a font override are in effect, and every problem; an open pane redraws at once. When they report a problem, fix the file and have them run it again.
 

@@ -115,6 +115,7 @@ export type PlanJob = {
 }
 
 export type PlanTheme = {
+  preset?: string
   colors: Record<string, string>
   font?: string
 }

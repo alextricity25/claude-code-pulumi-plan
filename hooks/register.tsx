@@ -59,7 +59,7 @@ import {
   upsertRun,
 } from './plan'
 import type { Card, Entry, Preview } from './plan'
-import { bannerSvg, chipSvg, describeTheme, metaLabel, parseTheme, pillHoverFill, plural, resolveTheme } from './style'
+import { bannerSvg, chipSvg, describePresets, describeTheme, metaLabel, parseTheme, pillHoverFill, plural, resolveTheme } from './style'
 import type { PaletteKey, PillKey, ThemeLoad } from './style'
 
 const PANE = 'pulumi-plan'
@@ -957,8 +957,8 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'pulumi-plan',
-      description: 'Open the Pulumi plan pane; `/pulumi-plan clear` empties it, `/pulumi-plan theme` reloads its theme file',
-      argumentHint: '[clear|theme]',
+      description: 'Open the Pulumi plan pane; `/pulumi-plan clear` empties it, `/pulumi-plan theme` reloads its theme file, `/pulumi-plan theme list` lists the bundled themes',
+      argumentHint: '[clear|theme|theme list]',
     })
     try {
       const load = await refreshTheme($)
@@ -997,6 +997,11 @@ export const register: Register = on => {
             ? `Pulumi plan pane cleared, except the running apply job${kept.length === 1 ? '' : 's'} for ${kept.join(', ')}.`
             : 'Pulumi plan pane cleared.',
       }
+    }
+    if (args === 'theme list') {
+      const load = await refreshTheme($)
+
+      return { text: describePresets(load.theme.preset) }
     }
     if (args === 'theme') {
       const load = await refreshTheme($)

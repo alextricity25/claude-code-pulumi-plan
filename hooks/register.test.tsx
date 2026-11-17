@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 
 import { launchArgv, previewArgv } from './apply'
 import { URNS, applyPreview, baselinePreview, branchPreview, preMergePreview, urn } from './fixtures'
-import { DEFAULT_PALETTE as PALETTE, PILL_KEYS, chipSvg, pillHoverFill } from './style'
+import { DEFAULT_PALETTE as PALETTE, PILL_KEYS, THEME_PRESETS, chipSvg, pillHoverFill } from './style'
 
 const TOOL = 'mcp__pulumi-plan__show'
 const HEAD = 'c0ffee0000000000000000000000000000000001'
@@ -1583,4 +1583,25 @@ test('an unknown risk level or an overlong reason is refused', async ($, on) => 
 
   expect(odd.text ?? odd.deny).toMatch(/risk must be "low", "medium" or "high"/)
   expect(long.text ?? long.deny).toMatch(/riskReason must be at most 300 characters/)
+})
+
+test('a preset in the theme file draws the pane in that theme, and /pulumi-plan theme list marks it', async ($, on) => {
+  recordUi(on, { isPaneOpen: true })
+  const { rec } = applyEngine(on)
+  rec.files[THEME_PATH] = JSON.stringify({ preset: 'solarized-dark', colors: { pillCard: '#1f6feb' } })
+  await start($)
+  await registerApply($, 'staging', {}, rec.files)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' as (typeof SURFACES)[number] })
+
+  const drawn = await drawnColors(ui)
+  const solarized = THEME_PRESETS['solarized-dark']
+  for (const color of [solarized.paper, solarized.card, solarized.ink, solarized.accent, '#1f6feb']) {
+    expect(`${color}: ${drawn.has(color)}`).toBe(`${color}: true`)
+  }
+  for (const color of [PALETTE.paper, PALETTE.ink, solarized.pillCard]) {
+    expect(`${color}: ${drawn.has(color)}`).toBe(`${color}: false`)
+  }
+  const listed = (await runCommand($, 'theme list')).text ?? ''
+  expect(listed).toContain('- solarized-dark (in effect)')
+  expect(listed).not.toContain('- default (in effect)')
 })
